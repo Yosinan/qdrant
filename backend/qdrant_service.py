@@ -44,5 +44,16 @@ def search_similar_patients(query_embedding):
 # Fetch external API data (e.g., EHR, research papers)
 def fetch_external_data(clinician_id):
     # Simulating an API call
-    response = requests.get(f"https://api.example.com/clinician/{clinician_id}/data")
-    return response.json() if response.status_code == 200 else {}
+
+    return {
+        "clinician_id": clinician_id,
+        "specialization": "endocrinology",
+        "preferences": {
+            "language": "en",
+            "treatment_approach": "holistic"
+        }
+    }
+
+    # response = requests.get(f"https://api.example.com/clinician/{clinician_id}/data")
+    # return response.json() if response.status_code == 200 else {}
+

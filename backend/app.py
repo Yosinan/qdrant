@@ -90,36 +90,149 @@ def summary():
     summary_text = generate_summary(data)
     return jsonify({"summary": summary_text}), 200
 
+@app.route('/search', methods=['POST'])
+def search():
+    data = request.json
+    query = data.get('query')  # General query text
+
+    if not query:
+        return jsonify({"error": "Missing query"}), 400
+
+    # Generate embedding from the query
+    query_embedding = generate_embedding(query)
+
+    # Search for similar patients or relevant data
+    results = search_similar_patients(query_embedding)
+
+    # Convert ScoredPoint objects to JSON-serializable format
+    serialized_results = []
+    for result in results:
+        serialized_results.append({
+            "id": result.id,
+            "payload": result.payload,
+            "score": result.score
+        })
+
+    return jsonify({"results": serialized_results}), 200
+
 @app.route('/chat', methods=['POST'])
 def chat_with_agent():
     data = request.json
     clinician_id = data.get('clinician_id')
     query = data.get('query')
+
     if not clinician_id or not query:
         return jsonify({"error": "Missing required fields"}), 400
-    query_embedding = generate_embedding(query)
-    similar_patients = search_similar_patients(query_embedding)
-    clinician_data = ['fetch_external_data(clinician_id)']
-    summary = generate_summary({"patients": similar_patients, "clinician_data": clinician_data})
-    return jsonify({"response": summary, "context": clinician_data}), 200
 
+    # Step 1: Generate embedding for the query
+    query_embedding = generate_embedding(query)
+
+    # Step 2: Search for similar patients
+    similar_patients = search_similar_patients(query_embedding)
+
+    serialized_patients = []
+    for patient in similar_patients:
+        serialized_patients.append({
+            "id": patient.id,
+            "payload": patient.payload,
+            "score": patient.score
+        })
+    
+    # Step 3: Fetch clinician-specific data
+    clinician_data = fetch_external_data(clinician_id)
+    
+    # Step 4: Generate a summary using Gemini
+    summary = generate_summary_gemini({
+        "query": query,
+        "similar_patients": similar_patients,
+        "clinician_data": clinician_data
+    })
+
+    # Step 5: Return the response
+    return jsonify({
+        "response": summary,
+        "context": {
+            "clinician_id": clinician_id,
+            "similar_patients": serialized_patients,
+            "clinician_data": clinician_data
+        }
+    }), 200
+
+
+def autonomous_agent(clinician_id, query):
+    # Step 1: Generate embedding for the query
+    query_embedding = generate_embedding(query)
+
+    # Step 2: Search for similar patients
+    similar_patients = search_similar_patients(query_embedding)
+
+    # Step 3: Fetch clinician-specific data
+    clinician_data = fetch_external_data(clinician_id)
+
+    # Step 4: Generate a summary using Gemini
+    summary = generate_summary_gemini({
+        "query": query,
+        "similar_patients": similar_patients,
+        "clinician_data": clinician_data
+    })
+
+    # Step 5: Schedule follow-up tasks (e.g., sending reminders, fetching more data)
+    schedule_task({
+        "clinician_id": clinician_id,
+        "action": "follow_up",
+        "summary": summary
+    })
+
+    return summary
+
+@app.route('/autonomous_agent', methods=['POST'])
+def autonomous_agent_endpoint():
+    data = request.json
+    clinician_id = data.get('clinician_id')
+    query = data.get('query')
+
+    if not clinician_id or not query:
+        return jsonify({"error": "Missing required fields"}), 400
+
+    # Call the autonomous agent
+    response = autonomous_agent(clinician_id, query)
+
+    return jsonify({"response": response}), 200
 
 # Google Cloud Scheduler Task
 @app.route('/schedule_task', methods=['POST'])
 def schedule_task():
+    data = request.json
+    clinician_id = data.get('clinician_id')
+    action = data.get('action')
+    summary = data.get('summary')
+
+    if not clinician_id or not action or not summary:
+        return jsonify({"error": "Missing required fields"}), 400
+
     client = tasks_v2.CloudTasksClient()
     project = "your-gcp-project-id"
     queue = "your-task-queue"
     location = "your-region"
     url = "https://your-cloud-function-url"  # Replace with actual URL
     parent = client.queue_path(project, location, queue)
+
+    # Define the task payload
     task = {
         "http_request": {
             "http_method": tasks_v2.HttpMethod.POST,
             "url": url,
+            "body": json.dumps({
+                "clinician_id": clinician_id,
+                "action": action,
+                "summary": summary
+            }).encode()
         }
     }
+
+    # Create the task
     response = client.create_task(request={"parent": parent, "task": task})
+
     return jsonify({"message": "Task scheduled successfully", "task_name": response.name}), 200
 
 
