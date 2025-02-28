@@ -1,0 +1,6 @@
+.env
+api.rest
+
+cloud-access-key.json
+
+__pycache__/
