@@ -2,39 +2,28 @@ from flask import Flask, request, jsonify
 from transformers import pipeline
 from qdrant_service import setup_collection, insert_patient_record, search_similar_patients, fetch_external_data
 from sentence_transformers import SentenceTransformer
-import time
-import google.auth
 from google.cloud import tasks_v2
 import google.generativeai as genai
+from dotenv import load_dotenv
+import os
 
-from mocks import test_get_clinician_data, get_clinician_data # Import mock test function.
-from utils import generate_fake_clinician_data # Import synthetic data function.
+load_dotenv()
 
-genai.configure(api_key="AIzaSyDe8DIz9uSPgDVtXKQ9chzuflcH85ZPZcs")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
-# for model in genai.list_models():
-#     print(f"Model: {model.name}")
-#     print(f"  Description: {model.description}")
-#     print(f"  Supported Generation Methods: {model.supported_generation_methods}")
-#     print("-" * 20)
+genai.configure(api_key=GEMINI_API_KEY)
 
 app = Flask(__name__)
 
-# Load the embedding model
-# embedding_model = SentenceTransformer('sentence-transformers/all-mpnet-base-v2')  # 768-dimensional embeddings
 
 # Generate embeddings
 def generate_embedding(text):
     embedding = embedding_model.encode(text)  # Generate embedding
     return embedding.tolist()  # Convert to list for JSON serialization
 
-# Initialize the summarization pipeline
-# summarizer = pipeline("summarization", model="facebook/bart-large-cnn")
 
 # Load smaller models
-# embedding_model = SentenceTransformer('sentence-transformers/all-MiniLM-L6-v2') # Smaller embedding model
 embedding_model = SentenceTransformer('sentence-transformers/all-mpnet-base-v2')
-# summarizer = pipeline("summarization", model="sshleifer/distilbart-cnn-12-6") # Smaller summarization model
 
 def generate_summary_gemini(text):
     model = genai.GenerativeModel('models/gemini-1.5-pro-latest')
@@ -43,8 +32,6 @@ def generate_summary_gemini(text):
 
 # Generate a summary using GenAI
 def generate_summary(data):
-    # summary = summarizer(str(data), max_length=100, min_length=30, do_sample=False)
-    # return summary[0]["summary_text"]
     summary = generate_summary_gemini(data)
     return summary
 
@@ -54,7 +41,6 @@ def generate_summary(data):
 def insert_patient():
     data = request.json
     patient_id = data.get('patient_id')
-    # embedding = data.get('embedding')  # Assuming embedding is provided as a list
     text = data.get('text')
     metadata = data.get('metadata')  # Metadata should be a dictionary
 
@@ -69,8 +55,6 @@ def insert_patient():
 @app.route('/search_similar_patients', methods=['POST'])
 def search_patients():
     data = request.json
-    # query_embedding = data.get('query_embedding')  # Assuming query_embedding is provided as a list
-
     text = data.get('text')  # Text data to generate embedding
 
     if not text:
@@ -138,12 +122,6 @@ def schedule_task():
     response = client.create_task(request={"parent": parent, "task": task})
     return jsonify({"message": "Task scheduled successfully", "task_name": response.name}), 200
 
-
-@app.route('/clinician/<clinician_id>')
-def get_clinician(clinician_id):
-    clinician_data = get_clinician_data(clinician_id) # Use mock api.
-    # clinician_data = generate_fake_clinician_data() # or use synthetic data.
-    return jsonify(clinician_data)
 
 @app.route('/')
 def home():
