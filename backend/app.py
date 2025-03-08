@@ -1,7 +1,9 @@
-from flask import Flask, request, jsonify
-from transformers import pipeline
+import datetime
+from flask import Flask, json, logging, request, jsonify
+from flask_cors import CORS
+import openai
 from qdrant_service import setup_collection, insert_patient_record, search_similar_patients, fetch_external_data
-from sentence_transformers import SentenceTransformer
+# from sentence_transformers import SentenceTransformer
 from google.cloud import tasks_v2
 import google.generativeai as genai
 from dotenv import load_dotenv
@@ -10,75 +12,86 @@ import os
 load_dotenv()
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+
 
 genai.configure(api_key=GEMINI_API_KEY)
+openai.api_key = OPENAI_API_KEY
 
 app = Flask(__name__)
+CORS(app, resources={r"/*": {"origins": "*"}})
+
+# Load the embedding model
+# embedding_model = SentenceTransformer('sentence-transformers/all-mpnet-base-v2')
 
 
-# Generate embeddings
+# Generate embeddings using OpenAI
 def generate_embedding(text):
-    embedding = embedding_model.encode(text)  # Generate embedding
-    return embedding.tolist()  # Convert to list for JSON serialization
+
+    response = openai.embeddings.create(
+        input=text,
+        model="text-embedding-ada-002"
+    )
+
+    embedding = response['data'][0]['embedding']
+    print(embedding)
+    
+    # return embedding
 
 
-# Load smaller models
-embedding_model = SentenceTransformer('sentence-transformers/all-mpnet-base-v2')
+# Generate embeddings using Sentence Transformers
+# def generate_embedding(text):
+#     embedding = embedding_model.encode(text)  # Generate embedding
+#     return embedding.tolist()  # Convert to list for JSON serialization
 
 def generate_summary_gemini(text):
     model = genai.GenerativeModel('models/gemini-1.5-pro-latest')
     response = model.generate_content(f"Summarize the following text: {text}")
-    return response.text
-
-# Generate a summary using GenAI
-def generate_summary(data):
-    summary = generate_summary_gemini(data)
-    return summary
+    return response.text if response else "Summary not available."
 
 
 # Flask route to insert patient records
 @app.route('/insert_patient', methods=['POST'])
 def insert_patient():
-    data = request.json
-    patient_id = data.get('patient_id')
-    text = data.get('text')
-    metadata = data.get('metadata')  # Metadata should be a dictionary
+    try:
+        data = request.json
+        patient_id = data.get('patient_id')
+        text = data.get('text')
+        metadata = data.get('metadata', {})
 
-    if not patient_id or not text or not metadata:
-        return jsonify({"error": "Missing patient_id, embedding, or metadata"}), 400
+        if not patient_id or not text:
+            return jsonify({"error": "Missing patient_id or text"}), 400
 
-    embedding = generate_embedding(text)
-    insert_patient_record(patient_id, embedding, metadata)
-    return jsonify({"message": "Patient record inserted successfully"}), 200
+        embedding = generate_embedding(text)
+        insert_patient_record(patient_id, embedding, metadata)
+        return jsonify({"message": "Patient record inserted successfully"}), 200
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 # Flask route to search for similar patients
 @app.route('/search_similar_patients', methods=['POST'])
 def search_patients():
-    data = request.json
-    text = data.get('text')  # Text data to generate embedding
+    try:
+        data = request.json
+        text = data.get('text')
 
-    if not text:
-        return jsonify({"error": "Missing text"}), 400
+        if not text:
+            return jsonify({"error": "Missing text"}), 400
 
-    # Generate embedding from text
-    query_embedding = generate_embedding(text)
-    # print(query_embedding)
-    if not query_embedding:
-        return jsonify({"error": "Missing query_embedding"}), 400
+        query_embedding = generate_embedding(text)
+        results = search_similar_patients(query_embedding)
 
-    # Search for similar patients
-    results = search_similar_patients(query_embedding)
-
-    # Convert ScoredPoint objects to JSON-serializable format
-    serialized_results = []
-    for result in results:
-        serialized_results.append({
+        serialized_results = [{
             "id": result.id,
             "payload": result.payload,
             "score": result.score
-        })
+        } for result in results]
 
-    return jsonify({"similar_patients": serialized_results}), 200
+        return jsonify({"similar_patients": serialized_results if serialized_results else "No matches found"}), 200
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 # Flask route to generate a summary
 @app.route('/generate_summary', methods=['POST'])
@@ -87,153 +100,102 @@ def summary():
     if not data:
         return jsonify({"error": "Missing data"}), 400
 
-    summary_text = generate_summary(data)
+    summary_text = generate_summary_gemini(data)
     return jsonify({"summary": summary_text}), 200
 
 @app.route('/search', methods=['POST'])
 def search():
-    data = request.json
-    query = data.get('query')  # General query text
+    try:
+        data = request.json
+        clinician_id = data.get('clinician_id')
+        query = data.get('query')
 
-    if not query:
-        return jsonify({"error": "Missing query"}), 400
+        if not clinician_id or not query:
+            return jsonify({"error": "Missing required fields"}), 400
 
-    # Generate embedding from the query
-    query_embedding = generate_embedding(query)
+        # Step 1: Answer the query using Gemini
+        model = genai.GenerativeModel('models/gemini-1.5-pro-latest')
+        response = model.generate_content(query)
+        answer = response.text
 
-    # Search for similar patients or relevant data
-    results = search_similar_patients(query_embedding)
+        # Step 2: Find similar patients (optional)
+        query_embedding = generate_embedding(query)
+        similar_patients = search_similar_patients(query_embedding)
 
-    # Convert ScoredPoint objects to JSON-serializable format
-    serialized_results = []
-    for result in results:
-        serialized_results.append({
-            "id": result.id,
-            "payload": result.payload,
-            "score": result.score
-        })
+        # Serialize patient search results
+        serialized_patients = [{
+            "id": patient.id,
+            **patient.payload,  # Flatten payload
+            "score": round(patient.score, 4)  # Limit score precision
+        } for patient in similar_patients]
 
-    return jsonify({"results": serialized_results}), 200
+        return jsonify({
+            "query": query,
+            "answer": answer,  # Direct answer from Gemini
+            "matched_patients": serialized_patients,  # Similar patients
+            "clinician_info": {
+                "name": "Dr. Emily Carter",
+                "specialization": "Cardiology",
+                "hospital": "Johns Hopkins Hospital"
+            }
+        }), 200
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 
 @app.route('/chat', methods=['POST'])
 def chat_with_agent():
-    data = request.json
-    clinician_id = data.get('clinician_id')
-    query = data.get('query')
+    try:
+        data = request.json
+        clinician_id = data.get('clinician_id')
+        query = data.get('query')
 
-    if not clinician_id or not query:
-        return jsonify({"error": "Missing required fields"}), 400
+        if not clinician_id or not query:
+            return jsonify({"error": "Missing required fields"}), 400
 
-    # Step 1: Generate embedding for the query
-    query_embedding = generate_embedding(query)
+        # Get clinician data
+        clinician_data = fetch_external_data(clinician_id)
+        
+        # Generate embedding for search
+        query_embedding = generate_embedding(query)
+        similar_patients = search_similar_patients(query_embedding)
 
-    # Step 2: Search for similar patients
-    similar_patients = search_similar_patients(query_embedding)
-
-    serialized_patients = []
-    for patient in similar_patients:
-        serialized_patients.append({
+        # Serialize similar patient data
+        serialized_patients = [{
             "id": patient.id,
             "payload": patient.payload,
             "score": patient.score
-        })
-    
-    # Step 3: Fetch clinician-specific data
-    clinician_data = fetch_external_data(clinician_id)
-    
-    # Step 4: Generate a summary using Gemini
-    summary = generate_summary_gemini({
-        "query": query,
-        "similar_patients": similar_patients,
-        "clinician_data": clinician_data
-    })
+        } for patient in similar_patients]
 
-    # Step 5: Return the response
-    return jsonify({
-        "response": summary,
-        "context": {
-            "clinician_id": clinician_id,
-            "similar_patients": serialized_patients,
-            "clinician_data": clinician_data
-        }
-    }), 200
+        print(clinician_data["name"])
+        # AI-enhanced response generation
+        prompt = f"""
+        You are an AI clinical assistant specializing in {clinician_data['specialization']}.
+        A clinician ({clinician_data['name']}, {clinician_data['years_of_experience']} years experience) has asked:
 
+        "{query}"
 
-def autonomous_agent(clinician_id, query):
-    # Step 1: Generate embedding for the query
-    query_embedding = generate_embedding(query)
+        Here are some relevant patient records:
+        {json.dumps(serialized_patients, indent=2)}
 
-    # Step 2: Search for similar patients
-    similar_patients = search_similar_patients(query_embedding)
+        Based on this, provide a professional response using {clinician_data['preferences']['treatment_approach']} principles.
+        """
 
-    # Step 3: Fetch clinician-specific data
-    clinician_data = fetch_external_data(clinician_id)
+        model = genai.GenerativeModel('models/gemini-1.5-pro-latest')
+        response = model.generate_content(prompt)
 
-    # Step 4: Generate a summary using Gemini
-    summary = generate_summary_gemini({
-        "query": query,
-        "similar_patients": similar_patients,
-        "clinician_data": clinician_data
-    })
-
-    # Step 5: Schedule follow-up tasks (e.g., sending reminders, fetching more data)
-    schedule_task({
-        "clinician_id": clinician_id,
-        "action": "follow_up",
-        "summary": summary
-    })
-
-    return summary
-
-@app.route('/autonomous_agent', methods=['POST'])
-def autonomous_agent_endpoint():
-    data = request.json
-    clinician_id = data.get('clinician_id')
-    query = data.get('query')
-
-    if not clinician_id or not query:
-        return jsonify({"error": "Missing required fields"}), 400
-
-    # Call the autonomous agent
-    response = autonomous_agent(clinician_id, query)
-
-    return jsonify({"response": response}), 200
-
-# Google Cloud Scheduler Task
-@app.route('/schedule_task', methods=['POST'])
-def schedule_task():
-    data = request.json
-    clinician_id = data.get('clinician_id')
-    action = data.get('action')
-    summary = data.get('summary')
-
-    if not clinician_id or not action or not summary:
-        return jsonify({"error": "Missing required fields"}), 400
-
-    client = tasks_v2.CloudTasksClient()
-    project = "your-gcp-project-id"
-    queue = "your-task-queue"
-    location = "your-region"
-    url = "https://your-cloud-function-url"  # Replace with actual URL
-    parent = client.queue_path(project, location, queue)
-
-    # Define the task payload
-    task = {
-        "http_request": {
-            "http_method": tasks_v2.HttpMethod.POST,
-            "url": url,
-            "body": json.dumps({
+        return jsonify({
+            "response": response.text if response else "I couldn't generate an answer.",
+            "context": {
                 "clinician_id": clinician_id,
-                "action": action,
-                "summary": summary
-            }).encode()
-        }
-    }
+                "clinician_data": clinician_data,
+                "similar_patients": serialized_patients
+            }
+        }), 200
 
-    # Create the task
-    response = client.create_task(request={"parent": parent, "task": task})
-
-    return jsonify({"message": "Task scheduled successfully", "task_name": response.name}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 
 @app.route('/')
@@ -244,4 +206,5 @@ def home():
 setup_collection()
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    port = int(os.environ.get('PORT', 8080))
+    app.run(host='0.0.0.0', port=port, debug=True)
