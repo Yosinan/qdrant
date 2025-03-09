@@ -20,6 +20,7 @@ client = QdrantClient(
     api_key=API_KEY
 )
 
+
 # Ensure the collection exists
 def setup_collection():
     existing_collections = client.get_collections()
@@ -28,13 +29,14 @@ def setup_collection():
     if COLLECTION_NAME not in collection_names:
         client.create_collection(
             collection_name=COLLECTION_NAME,
-            vectors_config=VectorParams(size=768, distance=Distance.COSINE)
+            vectors_config=VectorParams(size=1536, distance=Distance.COSINE)
         )
+
 
 # Insert a new patient record
 def insert_patient_record(patient_id, embedding, metadata):
     point = PointStruct(id=patient_id, vector=embedding, payload=metadata)
-    client.upsert(collection_name=COLLECTION_NAME, points=[point], wait=True)
+    client.upsert(collection_name=COLLECTION_NAME, points=[point])
 
 # Search for similar patients
 def search_similar_patients(query_embedding):
@@ -93,7 +95,3 @@ def fetch_external_data(clinician_id):
             "treatment_approach": "Standard medical guidelines"
         }
     })
-
-    # response = requests.get(f"https://api.example.com/clinician/{clinician_id}/data")
-    # return response.json() if response.status_code == 200 else {}
-
