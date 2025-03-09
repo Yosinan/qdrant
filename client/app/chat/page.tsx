@@ -1,8 +1,8 @@
-"use client"
+"use client";
 
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
-import { Button } from "@/components/ui/button"
-import { Card } from "@/components/ui/card"
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -10,34 +10,101 @@ import {
   DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
-import { ScrollArea } from "@/components/ui/scroll-area"
-import { Textarea } from "@/components/ui/textarea"
-import { Bot, Loader2, Send, Settings } from "lucide-react"
-import { useState } from "react"
+} from "@/components/ui/dropdown-menu";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { Textarea } from "@/components/ui/textarea";
+import { Bot, Loader2, Send, Settings } from "lucide-react";
+import { useState } from "react";
 
 export default function ChatInterface() {
-  const [loading, setLoading] = useState(false)
-  const [messages, setMessages] = useState(initialMessages)
+  const [loading, setLoading] = useState(false);
+  const [messages, setMessages] = useState(initialMessages);
 
-  const handleSend = () => {
-    setLoading(true)
-    setTimeout(() => {
-      setLoading(false)
-      setMessages([
-        ...messages,
+  const handleSend = async () => {
+    const textarea = document.querySelector("textarea");
+    if (!textarea) return;
+    const userMessage = textarea.value; // Get the user's input
+    if (!userMessage.trim()) return; // Don't send empty messages
+
+    setLoading(true);
+
+    try {
+      // Add the user's message to the chat
+      setMessages((prevMessages) => [
+        ...prevMessages,
+        { role: "user", content: userMessage },
+      ]);
+
+      const response = await fetch(
+        "https://clinical-agent-api-619052101442.us-central1.run.app/",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            clinician_id: "doctor_001", // Replace with the actual clinician ID
+            query: userMessage,
+          }),
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error("Failed to fetch response from the server");
+      }
+
+      const data = await response.json();
+      console.log("Backend Response:", data);
+
+      // Extract clinician data
+      const clinicianData = data.context.clinician_data;
+      const clinicianInfo = `Clinician: ${clinicianData.name} at ${clinicianData.hospital}, Specialization: ${clinicianData.specialization}, Experience: ${clinicianData.years_of_experience} years`;
+
+      // Extract similar patients
+      const similarPatients = data.context.similar_patients;
+      const similarPatientsContent = similarPatients
+        .map(
+          (patient: any) => `
+            Patient ID: ${patient.id}
+            Age: ${patient.payload.age}
+            Gender: ${patient.payload.gender}
+            Diagnosis: ${patient.payload.diagnosis}
+            Last Visit: ${patient.payload.last_visit}
+            Medications: ${patient.payload.medications.join(", ")}
+            Score: ${patient.score.toFixed(4)}
+            `
+        )
+        .join("\n\n");
+
+      // Add the assistant's response to the chat
+      setMessages((prevMessages) => [
+        ...prevMessages,
         {
           role: "assistant",
-          content:
-            "I've analyzed the patient's symptoms and medical history. Based on the available data, I recommend scheduling a follow-up appointment and ordering additional blood tests to confirm the diagnosis.",
-          actions: [
-            { label: "Schedule Follow-up", action: "schedule" },
-            { label: "Order Blood Tests", action: "order_tests" },
-          ],
+          content: data.response, // The detailed response from the AI
         },
-      ])
-    }, 2000)
-  }
+        {
+          role: "assistant",
+          content: similarPatientsContent || "No similar patients found.", // Similar patients' details
+        },
+      ]);
+    } catch (error) {
+      console.error("Error:", error);
+      setMessages((prevMessages) => [
+        ...prevMessages,
+        {
+          role: "assistant",
+          content: "Sorry, something went wrong. Please try again later.",
+        },
+      ]);
+    } finally {
+      setLoading(false);
+      const textarea = document.querySelector("textarea");
+      if (textarea) {
+        textarea.value = ""; // Clear the input field
+      }
+    }
+  };
 
   return (
     <div className="flex h-screen flex-col">
@@ -50,7 +117,9 @@ export default function ChatInterface() {
             </Avatar>
             <div>
               <h2 className="text-lg font-semibold">Dr. AI Assistant</h2>
-              <p className="text-sm text-muted-foreground">Oncology Specialist Mode</p>
+              <p className="text-sm text-muted-foreground">
+                Oncology Specialist Mode
+              </p>
             </div>
           </div>
           <DropdownMenu>
@@ -76,27 +145,19 @@ export default function ChatInterface() {
             <Card
               key={index}
               className={`flex max-w-[80%] flex-col space-y-2 p-4 ${
-                message.role === "user" ? "ml-auto bg-primary text-primary-foreground" : ""
+                message.role === "user"
+                  ? "ml-auto bg-primary text-primary-foreground"
+                  : ""
               }`}
             >
               <div className="flex items-start space-x-2">
-                {message.role === "assistant" && <Bot className="mt-1 h-4 w-4" />}
+                {message.role === "assistant" && (
+                  <Bot className="mt-1 h-4 w-4" />
+                )}
                 <div className="space-y-2">
-                  <p className="text-sm">{message.content}</p>
-                  {message.actions && (
-                    <div className="flex flex-wrap gap-2">
-                      {message.actions.map((action, actionIndex) => (
-                        <Button
-                          key={actionIndex}
-                          variant={message.role === "assistant" ? "secondary" : "outline"}
-                          size="sm"
-                        >
-                          {action.label}
-                        </Button>
-                      ))}
-                    </div>
-                  )}
-                  {message.source && <p className="text-xs text-muted-foreground">Source: {message.source}</p>}
+                  <p className="text-sm whitespace-pre-line">
+                    {message.content}
+                  </p>
                 </div>
               </div>
             </Card>
@@ -106,15 +167,28 @@ export default function ChatInterface() {
 
       <div className="border-t p-4">
         <div className="container flex items-center space-x-2">
-          <Textarea placeholder="Type your message..." className="min-h-[2.5rem] flex-1 resize-none" />
+          <Textarea
+            placeholder="Type your message..."
+            className="min-h-[2.5rem] flex-1 resize-none"
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                handleSend();
+              }
+            }}
+          />
           <Button onClick={handleSend} disabled={loading}>
-            {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+            {loading ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Send className="h-4 w-4" />
+            )}
             <span className="sr-only">Send message</span>
           </Button>
         </div>
       </div>
     </div>
-  )
+  );
 }
 
 const initialMessages = [
@@ -122,14 +196,4 @@ const initialMessages = [
     role: "assistant",
     content: "Hello! I'm your AI medical assistant. How can I help you today?",
   },
-  {
-    role: "user",
-    content: "Can you analyze the latest lab results for patient Jane Doe?",
-  },
-  {
-    role: "assistant",
-    content: "I'll analyze Jane Doe's recent lab results and medical history for you.",
-    source: "Patient Records #123",
-  },
-]
-
+];
