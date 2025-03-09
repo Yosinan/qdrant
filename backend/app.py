@@ -28,16 +28,22 @@ CORS(app, resources={r"/*": {"origins": "*"}})
 # Generate embeddings using OpenAI
 def generate_embedding(text):
 
-    response = openai.embeddings.create(
+    # response = openai.Embedding.create(
+    #     input=text,
+    #     model="text-embedding-ada-002",
+    #     max_tokens=768
+    # )
+
+    # embedding = response['data'][0]['embedding']
+    # print(embedding)
+    
+    # return embedding
+    response = openai.Embedding.create(
         input=text,
         model="text-embedding-ada-002"
     )
 
-    embedding = response['data'][0]['embedding']
-    print(embedding)
-    
-    # return embedding
-
+    return response['data'][0]['embedding']
 
 # Generate embeddings using Sentence Transformers
 # def generate_embedding(text):
@@ -63,6 +69,7 @@ def insert_patient():
             return jsonify({"error": "Missing patient_id or text"}), 400
 
         embedding = generate_embedding(text)
+        # print(embedding)
         insert_patient_record(patient_id, embedding, metadata)
         return jsonify({"message": "Patient record inserted successfully"}), 200
 
