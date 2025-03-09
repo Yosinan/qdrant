@@ -4,3 +4,5 @@ api.rest
 cloud-access-key.json
 
 __pycache__/
+
+Dockerfile
