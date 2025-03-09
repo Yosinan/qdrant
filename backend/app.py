@@ -3,7 +3,6 @@ from flask import Flask, json, logging, request, jsonify
 from flask_cors import CORS
 import openai
 from qdrant_service import setup_collection, insert_patient_record, search_similar_patients, fetch_external_data
-from sentence_transformers import SentenceTransformer
 from google.cloud import tasks_v2
 import google.generativeai as genai
 from dotenv import load_dotenv
@@ -21,46 +20,16 @@ openai.api_key = OPENAI_API_KEY
 app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "*"}})
 
-class OpenAiLLMService:
-    def __init__(self, model_name, api_key):
-        self.model_name = model_name
-        self.api_key = api_key
-
-open_ai_service_for_embeding = OpenAiLLMService(
-    model_name="gpt-4o-2024-08-06", api_key=os.getenv("OPENAI_API_KEY")
-)
-
-
-# Load the embedding model
-# embedding_model = SentenceTransformer('sentence-transformers/all-mpnet-base-v2')
-
-# Load spaCy model
-# nlp = spacy.load("en_core_web_trf")
-
 # Generate embeddings using OpenAI
 def generate_embedding(text):
-    # response = openai.Embedding.create(
-    #     input=text,
-    #     model="text-embedding-ada-002"
-    # )
-    # embedding = response['data'][0]['embedding']
 
     response = openai.Embedding.create(
         input=text,
         model="text-embedding-ada-002"
     )
 
-    embedding = response['data'][0]['embedding']
-    print(embedding)
-    # print(response.data[0].embedding)
-    # return embedding
+    return response['data'][0]['embedding']
 
-
-# Generate embeddings
-# def generate_embedding(text):
-#     embedding = embedding_model.encode(text)  # Generate embedding
-#     # embeeding = nlp(text)
-#     return embedding.tolist()  # Convert to list for JSON serialization
 
 def generate_summary_gemini(text):
     model = genai.GenerativeModel('models/gemini-1.5-pro-latest')
@@ -81,6 +50,7 @@ def insert_patient():
             return jsonify({"error": "Missing patient_id or text"}), 400
 
         embedding = generate_embedding(text)
+        # print(embedding)
         insert_patient_record(patient_id, embedding, metadata)
         return jsonify({"message": "Patient record inserted successfully"}), 200
 
@@ -214,83 +184,6 @@ def chat_with_agent():
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-
-
-def autonomous_agent(clinician_id, query):
-    # Step 1: Generate embedding for the query
-    query_embedding = generate_embedding(query)
-
-    # Step 2: Search for similar patients
-    similar_patients = search_similar_patients(query_embedding)
-
-    # Step 3: Fetch clinician-specific data
-    clinician_data = fetch_external_data(clinician_id)
-
-    # Step 4: Generate a summary using Gemini
-    summary = generate_summary_gemini({
-        "query": query,
-        "similar_patients": similar_patients,
-        "clinician_data": clinician_data
-    })
-
-    # Step 5: Schedule follow-up tasks (e.g., sending reminders, fetching more data)
-    schedule_task({
-        "clinician_id": clinician_id,
-        "action": "follow_up",
-        "summary": summary
-    })
-
-    return summary
-
-@app.route('/autonomous_agent', methods=['POST'])
-def autonomous_agent_endpoint():
-    data = request.json
-    clinician_id = data.get('clinician_id')
-    query = data.get('query')
-
-    if not clinician_id or not query:
-        return jsonify({"error": "Missing required fields"}), 400
-
-    # Call the autonomous agent
-    response = autonomous_agent(clinician_id, query)
-
-    return jsonify({"response": response}), 200
-
-# Google Cloud Scheduler Task
-@app.route('/schedule_task', methods=['POST'])
-def schedule_task():
-    data = request.json
-    clinician_id = data.get('clinician_id')
-    action = data.get('action')
-    summary = data.get('summary')
-
-    if not clinician_id or not action or not summary:
-        return jsonify({"error": "Missing required fields"}), 400
-
-    client = tasks_v2.CloudTasksClient()
-    project = "your-gcp-project-id"
-    queue = "your-task-queue"
-    location = "your-region"
-    url = "https://your-cloud-function-url"  # Replace with actual URL
-    parent = client.queue_path(project, location, queue)
-
-    # Define the task payload
-    task = {
-        "http_request": {
-            "http_method": tasks_v2.HttpMethod.POST,
-            "url": url,
-            "body": json.dumps({
-                "clinician_id": clinician_id,
-                "action": action,
-                "summary": summary
-            }).encode()
-        }
-    }
-
-    # Create the task
-    response = client.create_task(request={"parent": parent, "task": task})
-
-    return jsonify({"message": "Task scheduled successfully", "task_name": response.name}), 200
 
 
 @app.route('/')
