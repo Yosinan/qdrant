@@ -28,7 +28,7 @@ COPY . .
 ENV QDRANT_API_KEY="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhY2Nlc3MiOiJtIn0.V_Ac_d-IoMjG2Cl_CcFYqpJaB7E8yfPjmQvjAEFDDNs"
 ENV QDRANT_URL="https://a5f085b1-bd24-4395-847b-f40a09a64415.us-west-2-0.aws.cloud.qdrant.io"
 ENV GEMINI_API_KEY="AIzaSyDe8DIz9uSPgDVtXKQ9chzuflcH85ZPZcs"
-ENV OPENAI_API_KEY="your-openai-api-key"
+ENV OPENAI_API_KEY="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"
 ENV PORT=8080
 
 # Expose port 8080 for Cloud Run
