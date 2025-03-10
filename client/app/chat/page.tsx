@@ -34,9 +34,9 @@ export default function ChatInterface() {
         ...prevMessages,
         { role: "user", content: userMessage },
       ]);
-
+      
       const response = await fetch(
-        "https://clinical-agent-api-619052101442.us-central1.run.app/",
+        "https://clinical-agent-api-619052101442.us-central1.run.app/chat",
         {
           method: "POST",
           headers: {
@@ -54,7 +54,7 @@ export default function ChatInterface() {
       }
 
       const data = await response.json();
-      console.log("Backend Response:", data);
+      // console.log("Backend Response:", data);
 
       // Extract clinician data
       const clinicianData = data.context.clinician_data;
