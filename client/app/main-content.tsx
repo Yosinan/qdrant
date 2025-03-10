@@ -1,8 +1,15 @@
-"use client"
+"use client";
 
-import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command"
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command";
 import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
@@ -10,41 +17,54 @@ import {
   DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
-import { ScrollArea } from "@/components/ui/scroll-area"
-import { useToast } from "@/components/ui/use-toast"
-import { ChevronDown, Filter, ListFilter } from "lucide-react"
-import { useState } from "react"
-import { Bar, BarChart, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts"
+} from "@/components/ui/dropdown-menu";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { useToast } from "@/components/ui/use-toast";
+import { ChevronDown, Filter, ListFilter } from "lucide-react";
+import { useState } from "react";
+import {
+  Bar,
+  BarChart,
+  Line,
+  LineChart,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from "recharts";
+import axios from "axios";
 
 interface FilterState {
   sources: {
-    ehr: boolean
-    lab: boolean
-    imaging: boolean
-    notes: boolean
-  }
-  timeRange: "24h" | "7d" | "30d" | "all"
-  confidence: number
+    ehr: boolean;
+    lab: boolean;
+    imaging: boolean;
+    notes: boolean;
+  };
+  timeRange: "24h" | "7d" | "30d" | "all";
+  confidence: number;
 }
 
 interface SearchResult {
-  id: number
-  title: string
-  description: string
-  source: string
-  confidenceScore: number
-  date: string
-  relatedData?: {
-    patientCount?: number
-    trend?: { date: string; value: number }[]
-  }
+  id: number;
+  age: number;
+  diagnosis: string;
+  gender: string;
+  last_visit: string;
+  medications: string[];
+  score: number;
+}
+
+interface ClinicianInfo {
+  name: string;
+  specialization: string;
+  hospital: string;
 }
 
 export function MainContent() {
-  const { toast } = useToast()
-  const [view, setView] = useState<"list" | "graph">("list")
-  const [searchQuery, setSearchQuery] = useState("")
+  const { toast } = useToast();
+  const [view, setView] = useState<"list" | "graph">("list");
+  const [searchQuery, setSearchQuery] = useState("");
   const [filters, setFilters] = useState<FilterState>({
     sources: {
       ehr: true,
@@ -54,53 +74,84 @@ export function MainContent() {
     },
     timeRange: "24h",
     confidence: 80,
-  })
+  });
+  const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
+  const [answer, setAnswer] = useState<string>("");
+  const [clinicianInfo, setClinicianInfo] = useState<ClinicianInfo | null>(
+    null
+  );
+
+  const handleSearch = async (value: string) => {
+    setSearchQuery(value);
+    if (value.length > 2) {
+      try {
+        const response = await axios.post(
+          "https://clinical-agent-api-619052101442.us-central1.run.app/search",
+          {
+            clinician_id: "doctor_001",
+            query: value,
+            similarity_threshold: 0.5,
+          }
+        );
+        console.log(response.data);
+        setSearchResults(response.data.matched_patients);
+        setAnswer(response.data.answer);
+        setClinicianInfo(response.data.clinician_info);
+        toast({
+          title: "Searching...",
+          description: `Found ${response.data.matched_patients.length} results for "${value}"`,
+        });
+      } catch (error) {
+        toast({
+          title: "Error",
+          description: "Failed to fetch search results",
+        });
+      }
+    }
+  };
 
   // Filter results based on current filters and search query
   const filteredResults = searchResults.filter((result) => {
     // Filter by source
-    if (result.source === "Electronic Health Records" && !filters.sources.ehr) return false
-    if (result.source === "Lab Results Database" && !filters.sources.lab) return false
-    if (result.source === "Imaging Database" && !filters.sources.imaging) return false
-    if (result.source === "Clinical Notes" && !filters.sources.notes) return false
+    if (result.source === "Electronic Health Records" && !filters.sources.ehr)
+      return false;
+    if (result.source === "Lab Results Database" && !filters.sources.lab)
+      return false;
+    if (result.source === "Imaging Database" && !filters.sources.imaging)
+      return false;
+    if (result.source === "Clinical Notes" && !filters.sources.notes)
+      return false;
 
     // Filter by confidence score
-    if (result.confidenceScore < filters.confidence) return false
+    if (result.score * 100 < filters.confidence) return false;
 
     // Filter by search query
     if (searchQuery) {
-      const query = searchQuery.toLowerCase()
-      return result.title.toLowerCase().includes(query) || result.description.toLowerCase().includes(query)
+      const query = searchQuery.toLowerCase();
+      return (
+        result.diagnosis.toLowerCase().includes(query) ||
+        result.medications.some((med) => med.toLowerCase().includes(query))
+      );
     }
 
     // Filter by time range
-    const resultDate = new Date(result.date)
-    const now = new Date()
-    const hoursDiff = (now.getTime() - resultDate.getTime()) / (1000 * 60 * 60)
+    const resultDate = new Date(result.last_visit);
+    const now = new Date();
+    const hoursDiff = (now.getTime() - resultDate.getTime()) / (1000 * 60 * 60);
 
     switch (filters.timeRange) {
       case "24h":
-        return hoursDiff <= 24
+        return hoursDiff <= 24;
       case "7d":
-        return hoursDiff <= 168
+        return hoursDiff <= 168;
       case "30d":
-        return hoursDiff <= 720
+        return hoursDiff <= 720;
       case "all":
-        return true
+        return true;
       default:
-        return true
+        return true;
     }
-  })
-
-  const handleSearch = (value: string) => {
-    setSearchQuery(value)
-    if (value.length > 2) {
-      toast({
-        title: "Searching...",
-        description: `Found ${filteredResults.length} results for "${value}"`,
-      })
-    }
-  }
+  });
 
   return (
     <main className="flex-1 overflow-auto">
@@ -193,25 +244,33 @@ export function MainContent() {
                   <DropdownMenuSeparator />
                   <DropdownMenuCheckboxItem
                     checked={filters.timeRange === "24h"}
-                    onCheckedChange={() => setFilters((prev) => ({ ...prev, timeRange: "24h" }))}
+                    onCheckedChange={() =>
+                      setFilters((prev) => ({ ...prev, timeRange: "24h" }))
+                    }
                   >
                     Last 24 Hours
                   </DropdownMenuCheckboxItem>
                   <DropdownMenuCheckboxItem
                     checked={filters.timeRange === "7d"}
-                    onCheckedChange={() => setFilters((prev) => ({ ...prev, timeRange: "7d" }))}
+                    onCheckedChange={() =>
+                      setFilters((prev) => ({ ...prev, timeRange: "7d" }))
+                    }
                   >
                     Last 7 Days
                   </DropdownMenuCheckboxItem>
                   <DropdownMenuCheckboxItem
                     checked={filters.timeRange === "30d"}
-                    onCheckedChange={() => setFilters((prev) => ({ ...prev, timeRange: "30d" }))}
+                    onCheckedChange={() =>
+                      setFilters((prev) => ({ ...prev, timeRange: "30d" }))
+                    }
                   >
                     Last 30 Days
                   </DropdownMenuCheckboxItem>
                   <DropdownMenuCheckboxItem
                     checked={filters.timeRange === "all"}
-                    onCheckedChange={() => setFilters((prev) => ({ ...prev, timeRange: "all" }))}
+                    onCheckedChange={() =>
+                      setFilters((prev) => ({ ...prev, timeRange: "all" }))
+                    }
                   >
                     All Time
                   </DropdownMenuCheckboxItem>
@@ -226,54 +285,83 @@ export function MainContent() {
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="start">
-                  <DropdownMenuCheckboxItem checked={view === "list"} onCheckedChange={() => setView("list")}>
+                  <DropdownMenuCheckboxItem
+                    checked={view === "list"}
+                    onCheckedChange={() => setView("list")}
+                  >
                     List View
                   </DropdownMenuCheckboxItem>
-                  <DropdownMenuCheckboxItem checked={view === "graph"} onCheckedChange={() => setView("graph")}>
+                  <DropdownMenuCheckboxItem
+                    checked={view === "graph"}
+                    onCheckedChange={() => setView("graph")}
+                  >
                     Graph View
                   </DropdownMenuCheckboxItem>
                 </DropdownMenuContent>
               </DropdownMenu>
             </div>
-            <div className="text-sm text-muted-foreground">{filteredResults.length} results found</div>
+            <div className="text-sm text-muted-foreground">
+              {filteredResults.length} results found
+            </div>
           </div>
         </div>
         <ScrollArea className="h-[calc(100vh-12rem)]">
           {view === "list" ? (
             <div className="space-y-4">
+              {answer && (
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-lg">Answer</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <p className="text-sm text-muted-foreground">{answer}</p>
+                  </CardContent>
+                </Card>
+              )}
+              {clinicianInfo && (
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-lg">Clinician Info</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <p className="text-sm text-muted-foreground">
+                      Name: {clinicianInfo.name}
+                    </p>
+                    <p className="text-sm text-muted-foreground">
+                      Specialization: {clinicianInfo.specialization}
+                    </p>
+                    <p className="text-sm text-muted-foreground">
+                      Hospital: {clinicianInfo.hospital}
+                    </p>
+                  </CardContent>
+                </Card>
+              )}
               {filteredResults.map((result) => (
                 <Card key={result.id}>
                   <CardHeader>
-                    <CardTitle className="text-lg">{result.title}</CardTitle>
+                    <CardTitle className="text-lg">
+                      Patient ID: {result.id}
+                    </CardTitle>
                   </CardHeader>
                   <CardContent>
-                    <p className="text-sm text-muted-foreground">{result.description}</p>
-                    <div className="mt-4 space-y-4">
-                      {result.relatedData?.trend && (
-                        <ResponsiveContainer width="100%" height={100}>
-                          <LineChart data={result.relatedData.trend}>
-                            <XAxis dataKey="date" />
-                            <YAxis />
-                            <Tooltip />
-                            <Line type="monotone" dataKey="value" stroke="#0ea5e9" />
-                          </LineChart>
-                        </ResponsiveContainer>
-                      )}
-                      {result.relatedData?.patientCount && (
-                        <ResponsiveContainer width="100%" height={100}>
-                          <BarChart data={[{ count: result.relatedData.patientCount }]}>
-                            <XAxis dataKey="name" />
-                            <YAxis />
-                            <Tooltip />
-                            <Bar dataKey="count" fill="#0ea5e9" />
-                          </BarChart>
-                        </ResponsiveContainer>
-                      )}
-                    </div>
-                    <div className="mt-2 flex items-center justify-between">
-                      <span className="text-xs text-muted-foreground">Source: {result.source}</span>
-                      <span className="text-xs text-muted-foreground">Confidence Score: {result.confidenceScore}%</span>
-                    </div>
+                    <p className="text-sm text-muted-foreground">
+                      Age: {result.age}
+                    </p>
+                    <p className="text-sm text-muted-foreground">
+                      Gender: {result.gender}
+                    </p>
+                    <p className="text-sm text-muted-foreground">
+                      Diagnosis: {result.diagnosis}
+                    </p>
+                    <p className="text-sm text-muted-foreground">
+                      Last Visit: {result.last_visit}
+                    </p>
+                    <p className="text-sm text-muted-foreground">
+                      Medications: {result.medications.join(", ")}
+                    </p>
+                    <p className="text-sm text-muted-foreground">
+                      Score: {result.score}
+                    </p>
                   </CardContent>
                 </Card>
               ))}
@@ -283,10 +371,10 @@ export function MainContent() {
               <CardContent className="p-6">
                 <ResponsiveContainer width="100%" height={600}>
                   <BarChart data={filteredResults}>
-                    <XAxis dataKey="title" />
+                    <XAxis dataKey="id" />
                     <YAxis />
                     <Tooltip />
-                    <Bar dataKey="confidenceScore" fill="#0ea5e9" />
+                    <Bar dataKey="score" fill="#0ea5e9" />
                   </BarChart>
                 </ResponsiveContainer>
               </CardContent>
@@ -295,78 +383,5 @@ export function MainContent() {
         </ScrollArea>
       </div>
     </main>
-  )
+  );
 }
-
-const searchResults: SearchResult[] = [
-  {
-    id: 1,
-    title: "Patient Match: Similar Symptoms to Jane Doe",
-    description:
-      "Found 3 patients with matching symptom patterns: fever, fatigue, and joint pain. All cases were diagnosed within the last 30 days.",
-    source: "Electronic Health Records",
-    confidenceScore: 92,
-    date: "2024-02-24T08:00:00",
-    relatedData: {
-      patientCount: 3,
-      trend: [
-        { date: "Feb 20", value: 1 },
-        { date: "Feb 21", value: 2 },
-        { date: "Feb 22", value: 2 },
-        { date: "Feb 23", value: 3 },
-        { date: "Feb 24", value: 3 },
-      ],
-    },
-  },
-  {
-    id: 2,
-    title: "Related Treatment Protocol",
-    description:
-      "Standard treatment protocol for similar cases suggests starting with blood tests and rheumatoid factor testing.",
-    source: "Clinical Notes",
-    confidenceScore: 88,
-    date: "2024-02-23T15:30:00",
-  },
-  {
-    id: 3,
-    title: "Recent Lab Results",
-    description: "Latest blood work shows elevated inflammatory markers, consistent with suspected diagnosis.",
-    source: "Lab Results Database",
-    confidenceScore: 95,
-    date: "2024-02-24T09:15:00",
-    relatedData: {
-      trend: [
-        { date: "Feb 20", value: 30 },
-        { date: "Feb 21", value: 35 },
-        { date: "Feb 22", value: 40 },
-        { date: "Feb 23", value: 45 },
-        { date: "Feb 24", value: 50 },
-      ],
-    },
-  },
-  {
-    id: 4,
-    title: "Imaging Analysis",
-    description: "Recent chest X-rays show no significant abnormalities in the respiratory system.",
-    source: "Imaging Database",
-    confidenceScore: 90,
-    date: "2024-02-20T14:20:00",
-  },
-  {
-    id: 5,
-    title: "Treatment Response Analysis",
-    description: "Positive response to current treatment plan. Symptoms showing 60% improvement over 2 weeks.",
-    source: "Electronic Health Records",
-    confidenceScore: 87,
-    date: "2024-02-24T10:30:00",
-    relatedData: {
-      trend: [
-        { date: "Feb 10", value: 20 },
-        { date: "Feb 15", value: 40 },
-        { date: "Feb 20", value: 60 },
-        { date: "Feb 24", value: 80 },
-      ],
-    },
-  },
-]
-
