@@ -37,12 +37,12 @@ export default function SettingsPage() {
   const profileForm = useForm<z.infer<typeof profileFormSchema>>({
     resolver: zodResolver(profileFormSchema),
     defaultValues: {
-      name: "Dr. John Smith",
+      name: "Dr. Emily Carter",
       email: "doctor@hospital.com",
       specialty: "Cardiology",
       license: "MD12345",
     },
-  })
+  });
 
   const securityForm = useForm<z.infer<typeof securityFormSchema>>({
     resolver: zodResolver(securityFormSchema),
