@@ -38,14 +38,20 @@ def insert_patient_record(patient_id, embedding, metadata):
     point = PointStruct(id=patient_id, vector=embedding, payload=metadata)
     client.upsert(collection_name=COLLECTION_NAME, points=[point])
 
+
 # Search for similar patients
-def search_similar_patients(query_embedding):
+def search_similar_patients(query_embedding, similarity_threshold=0.85):
     results = client.search(
         collection_name=COLLECTION_NAME,
         query_vector=query_embedding,
-        limit=5,
+        limit=3,
         with_payload=True  # Ensures patient metadata is included in results
     )
+
+    # Filter out unrelated patients based on a similarity threshold
+    filtered_patients = [patient for patient in results if patient.score >= similarity_threshold]
+    return filtered_patients
+
     return results
 
 # Fetch external API data (e.g., EHR, research papers)

@@ -28,27 +28,12 @@ CORS(app, resources={r"/*": {"origins": "*"}})
 # Generate embeddings using OpenAI
 def generate_embedding(text):
 
-    # response = openai.Embedding.create(
-    #     input=text,
-    #     model="text-embedding-ada-002",
-    #     max_tokens=768
-    # )
-
-    # embedding = response['data'][0]['embedding']
-    # print(embedding)
-    
-    # return embedding
     response = openai.Embedding.create(
         input=text,
         model="text-embedding-ada-002"
     )
 
     return response['data'][0]['embedding']
-
-# Generate embeddings using Sentence Transformers
-# def generate_embedding(text):
-#     embedding = embedding_model.encode(text)  # Generate embedding
-#     return embedding.tolist()  # Convert to list for JSON serialization
 
 def generate_summary_gemini(text):
     model = genai.GenerativeModel('models/gemini-1.5-pro-latest')
@@ -116,6 +101,7 @@ def search():
         data = request.json
         clinician_id = data.get('clinician_id')
         query = data.get('query')
+        similarity_threshold = data.get('similarity_threshold')
 
         if not clinician_id or not query:
             return jsonify({"error": "Missing required fields"}), 400
@@ -127,7 +113,11 @@ def search():
 
         # Step 2: Find similar patients (optional)
         query_embedding = generate_embedding(query)
-        similar_patients = search_similar_patients(query_embedding)
+        if query_embedding is None:
+            return jsonify({"error": "Failed to generate query embedding"}), 500
+
+        similar_patients = search_similar_patients(query_embedding, similarity_threshold)
+
 
         # Serialize patient search results
         serialized_patients = [{
